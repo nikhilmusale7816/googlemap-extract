@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GMAP // Recon Terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..900,0..100,0..1&family=JetBrains+Mono:wght@300;400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+<link rel="stylesheet" href="/styles.css" />
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        ink: '#0a0e12',
+        ink2: '#11161d',
+        ink3: '#1a212b',
+        line: '#2a3340',
+        bone: '#e8e2d4',
+        bone2: '#c9c2b1',
+        amber: { DEFAULT: '#d4a574', soft: '#e6c599', deep: '#a07a4a' },
+        signal: { DEFAULT: '#5ee5d4', deep: '#2a9e8f' },
+        alert: '#e15b3e'
+      },
+      fontFamily: {
+        display: ['Fraunces', 'serif'],
+        editorial: ['"Instrument Serif"', 'serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace']
+      }
+    }
+  }
+}
+</script>
+</head>
+<body class="bg-ink text-bone font-mono antialiased min-h-screen overflow-x-hidden">
+
+<div class="fixed inset-0 pointer-events-none z-0 grid-bg"></div>
+<div class="fixed inset-0 pointer-events-none z-0 noise"></div>
+<div class="fixed inset-0 pointer-events-none z-0 vignette"></div>
+
+<div x-data="app()" x-init="init()" class="relative z-10">
+
+  <header class="border-b border-line/70">
+    <div class="max-w-[1600px] mx-auto px-8 py-5 flex items-end justify-between gap-8">
+      <div class="flex items-end gap-6">
+        <div class="font-display font-light text-4xl leading-none tracking-tight">
+          <span class="italic">g</span>map<span class="text-amber">.</span>
+        </div>
+        <div class="hidden md:block text-[10px] uppercase tracking-[0.3em] text-bone2/60 pb-1">
+          <div>Local Recon Terminal</div>
+          <div class="text-bone2/40">v1.0 // OSINT</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-5 text-[11px] uppercase tracking-[0.25em] text-bone2/70">
+        <div class="flex items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-signal animate-pulse"></span>
+          <span x-text="statusLabel"></span>
+        </div>
+        <div>·</div>
+        <div><span x-text="results.length"></span> rows</div>
+        <div>·</div>
+        <div><span x-text="emailHits"></span> email hits</div>
+        <div>·</div>
+        <button @click="openCompose()" :disabled="!selectableCount"
+                :class="!selectableCount ? 'opacity-30 cursor-not-allowed' : 'text-amber border-amber/60 hover:bg-amber hover:text-ink'"
+                class="border border-line/70 px-3 py-1.5 text-[10px] uppercase tracking-[0.25em] transition flex items-center gap-2">
+          <span>✉ Mail</span>
+          <span class="text-bone2/70" x-show="selected.size > 0">[<span x-text="selected.size"></span>]</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-[1600px] mx-auto px-8 py-8 grid grid-cols-12 gap-8">
+
+    <aside class="col-span-12 lg:col-span-4 xl:col-span-3">
+      <div class="sticky top-6 space-y-6">
+
+        <div class="border border-line/70 bg-ink2/60 backdrop-blur-sm">
+          <div class="px-5 py-3 border-b border-line/70 flex items-center justify-between">
+            <div class="text-[10px] uppercase tracking-[0.3em] text-bone2/70">// Query</div>
+            <div class="text-[10px] text-bone2/40">01</div>
+          </div>
+          <div class="p-5 space-y-5">
+
+            <div>
+              <label class="block text-[10px] uppercase tracking-[0.3em] text-bone2/60 mb-2">Business Type</label>
+              <div class="relative">
+                <input
+                  x-model="form.type"
+                  @keydown.enter="start()"
+                  type="text"
+                  placeholder="plumber, salon, dentist…"
+                  class="w-full bg-ink border border-line/80 px-3 py-3 text-bone font-mono text-sm focus:outline-none focus:border-amber/80 transition placeholder:text-bone2/30"
+                />
+                <div class="absolute right-3 top-1/2 -translate-y-1/2 text-amber/60 text-xs">▸</div>
+              </div>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                <template x-for="p in presets" :key="p">
+                  <button @click="form.type = p" class="text-[10px] uppercase tracking-wider px-2 py-1 border border-line/60 text-bone2/70 hover:border-amber/70 hover:text-amber transition" x-text="p"></button>
+                </template>
+              </div>
+            </div>
+
+            <div class="relative">
+              <label class="block text-[10px] uppercase tracking-[0.3em] text-bone2/60 mb-2">Location</label>
+              <div class="relative">
+                <input
+                  x-model="form.location"
+                  @input.debounce.350ms="suggest()"
+                  @focus="showSugg = true"
+                  @keydown.enter="start()"
+                  type="text"
+                  placeholder="city, region, country…"
+                  class="w-full bg-ink border border-line/80 px-3 py-3 text-bone font-mono text-sm focus:outline-none focus:border-amber/80 transition placeholder:text-bone2/30"
+                />
+                <div class="absolute right-3 top-1/2 -translate-y-1/2 text-amber/60 text-xs">◎</div>
+              </div>
+              <div x-show="showSugg && suggestions.length" @click.away="showSugg = false"
+                   class="absolute z-30 left-0 right-0 mt-1 bg-ink2 border border-line max-h-72 overflow-auto shadow-2xl">
+                <template x-for="(s, i) in suggestions" :key="i">
+                  <button @click="pickSuggestion(s)"
+                          class="block w-full text-left px-3 py-2.5 hover:bg-ink3 border-b border-line/40 last:border-b-0 transition">
+                    <div class="text-sm text-bone" x-text="s.short"></div>
+                    <div class="text-[10px] text-bone2/50 truncate" x-text="s.label"></div>
+                  </button>
+                </template>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-[10px] uppercase tracking-[0.3em] text-bone2/60 mb-2">Limit</label>
+                <input x-model.number="form.limit" type="number" min="5" max="120" step="5"
+                       class="w-full bg-ink border border-line/80 px-3 py-2.5 text-bone font-mono text-sm focus:outline-none focus:border-amber/80 transition"/>
+              </div>
+              <div>
+                <label class="block text-[10px] uppercase tracking-[0.3em] text-bone2/60 mb-2">Emails</label>
+                <button @click="form.emails = !form.emails"
+                        :class="form.emails ? 'border-amber/80 text-amber' : 'border-line/80 text-bone2/60'"
+                        class="w-full bg-ink border px-3 py-2.5 text-sm transition flex items-center justify-between">
+                  <span x-text="form.emails ? 'ENABLED' : 'OFF'"></span>
+                  <span x-text="form.emails ? '✓' : '○'"></span>
+                </button>
+              </div>
+            </div>
+
+            <div class="flex gap-3 pt-2">
+              <button @click="start()" :disabled="running"
+                      :class="running ? 'opacity-50 cursor-not-allowed' : 'hover:bg-amber hover:text-ink'"
+                      class="flex-1 bg-amber/90 text-ink font-mono uppercase tracking-[0.25em] text-xs py-3.5 transition">
+                <span x-show="!running">▶ Initiate</span>
+                <span x-show="running" class="flex items-center justify-center gap-2">
+                  <span class="inline-block w-2 h-2 bg-ink animate-ping"></span>
+                  <span>Scanning…</span>
+                </span>
+              </button>
+              <button @click="stop()" x-show="running"
+                      class="px-4 border border-alert/60 text-alert text-xs uppercase tracking-wider hover:bg-alert hover:text-ink transition">Halt</button>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="border border-line/70 bg-ink2/60 backdrop-blur-sm">
+          <div class="px-5 py-3 border-b border-line/70 flex items-center justify-between">
+            <div class="text-[10px] uppercase tracking-[0.3em] text-bone2/70">// Output</div>
+            <div class="text-[10px] text-bone2/40">02</div>
+          </div>
+          <div class="p-5 space-y-3">
+            <button @click="exportFile('csv')" :disabled="!results.length"
+                    :class="!results.length ? 'opacity-30 cursor-not-allowed' : 'hover:border-amber/80 hover:text-amber'"
+                    class="w-full border border-line/80 py-2.5 text-[11px] uppercase tracking-[0.25em] text-bone2 transition flex items-center justify-between px-4">
+              <span>Export CSV</span>
+              <span class="text-amber/60">↓</span>
+            </button>
+            <button @click="exportFile('json')" :disabled="!results.length"
+                    :class="!results.length ? 'opacity-30 cursor-not-allowed' : 'hover:border-amber/80 hover:text-amber'"
+                    class="w-full border border-line/80 py-2.5 text-[11px] uppercase tracking-[0.25em] text-bone2 transition flex items-center justify-between px-4">
+              <span>Export JSON</span>
+              <span class="text-amber/60">↓</span>
+            </button>
+            <button @click="copyAll()" :disabled="!results.length"
+                    :class="!results.length ? 'opacity-30 cursor-not-allowed' : 'hover:border-amber/80 hover:text-amber'"
+                    class="w-full border border-line/80 py-2.5 text-[11px] uppercase tracking-[0.25em] text-bone2 transition flex items-center justify-between px-4">
+              <span x-text="copiedAll ? 'Copied all rows' : 'Copy all rows'"></span>
+              <span class="text-signal/70" x-text="copiedAll ? '✓' : '⎘'"></span>
+            </button>
+            <button @click="clearAll()" :disabled="!results.length"
+                    :class="!results.length ? 'opacity-30 cursor-not-allowed' : 'hover:border-alert/80 hover:text-alert'"
+                    class="w-full border border-line/80 py-2.5 text-[11px] uppercase tracking-[0.25em] text-bone2 transition flex items-center justify-between px-4">
+              <span>Clear table</span>
+              <span class="text-alert/60">×</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="text-[10px] text-bone2/40 leading-relaxed font-mono px-1">
+          <div class="uppercase tracking-[0.3em] mb-2 text-bone2/60">// Notice</div>
+          <div>Local use only. Google Maps ToS forbids automated extraction. Do not host publicly. Respect robots and rate limits.</div>
+        </div>
+
+      </div>
+    </aside>
+
+    <section class="col-span-12 lg:col-span-8 xl:col-span-9">
+
+      <div class="flex items-end justify-between mb-6 gap-6 flex-wrap">
+        <div>
+          <div class="text-[10px] uppercase tracking-[0.3em] text-bone2/50 mb-1">Live Feed</div>
+          <h1 class="font-display text-5xl md:text-6xl font-extralight leading-[0.95] tracking-tight">
+            <span x-show="!results.length && !running" class="text-bone/80">Awaiting <span class="italic font-light text-amber">recon</span>.</span>
+            <span x-show="running" class="text-bone/80">Scanning <span class="italic font-light text-amber" x-text="form.type || '…'"></span></span>
+            <span x-show="!running && results.length" class="text-bone/80">
+              <span x-text="results.length"></span> <span class="italic font-light text-amber">candidates</span>.
+            </span>
+          </h1>
+          <div class="mt-2 text-xs text-bone2/50 font-mono" x-show="form.location">
+            ▸ <span x-text="form.location"></span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 flex-wrap justify-end">
+          <button @click="selectWithEmail()" :disabled="!selectableCount"
+                  :class="!selectableCount ? 'opacity-30' : 'hover:border-amber/80 hover:text-amber'"
+                  class="border border-line/80 px-3 py-2 text-[10px] uppercase tracking-[0.25em] text-bone2 transition">
+            ✓ all <span x-text="'(' + selectableCount + ')'"></span>
+          </button>
+          <button @click="clearSelection()" x-show="selected.size > 0"
+                  class="border border-line/80 px-3 py-2 text-[10px] uppercase tracking-[0.25em] text-bone2 hover:border-alert/70 hover:text-alert transition">
+            clear <span x-text="'(' + selected.size + ')'"></span>
+          </button>
+          <input x-model="filter" type="text" placeholder="filter table…"
+                 class="bg-ink border border-line/80 px-3 py-2 text-xs font-mono w-56 focus:outline-none focus:border-amber/80 transition placeholder:text-bone2/30"/>
+          <select x-model="sortKey" class="bg-ink border border-line/80 px-3 py-2 text-xs font-mono focus:outline-none focus:border-amber/80">
+            <option value="rating">sort: rating</option>
+            <option value="reviews">sort: reviews</option>
+            <option value="name">sort: name</option>
+          </select>
+        </div>
+      </div>
+
+      <template x-if="error">
+        <div class="border border-alert/60 bg-alert/10 text-alert px-4 py-3 mb-4 text-xs font-mono">
+          ! <span x-text="error"></span>
+        </div>
+      </template>
+
+      <div x-show="!filtered.length && !running" class="border border-dashed border-line/70 p-16 text-center">
+        <div class="font-display text-2xl text-bone2/40 italic mb-2">No signal yet.</div>
+        <div class="text-[11px] uppercase tracking-[0.3em] text-bone2/40">Enter a business type and location to begin</div>
+      </div>
+
+      <div class="space-y-2" x-show="filtered.length">
+        <template x-for="(r, idx) in filtered" :key="r.id">
+          <article class="group border border-line/60 bg-ink2/40 hover:border-amber/40 transition-colors p-5 flex flex-col md:flex-row gap-5">
+
+            <div class="md:w-12 flex md:flex-col items-start gap-2">
+              <label class="inline-flex items-center cursor-pointer"
+                     :class="!r.email ? 'cursor-not-allowed opacity-30' : ''">
+                <input type="checkbox" :checked="selected.has(r.id)" :disabled="!r.email"
+                       @change="toggleSelect(r.id)"
+                       class="custom-check" />
+                <span class="check-box" :class="selected.has(r.id) ? 'is-on' : ''"></span>
+              </label>
+              <div class="font-mono text-[10px] text-bone2/40" x-text="String(idx + 1).padStart(3, '0')"></div>
+              <div class="hidden md:block w-px flex-1 bg-line/40"></div>
+            </div>
+
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between gap-4 mb-2">
+                <h3 class="font-display text-2xl font-light leading-tight text-bone" x-text="r.name"></h3>
+                <div class="flex items-center gap-2 shrink-0">
+                  <template x-if="r.rating !== null && r.rating !== undefined">
+                    <div class="flex items-center gap-2">
+                      <div class="font-mono text-amber text-lg leading-none" x-text="r.rating.toFixed(1)"></div>
+                      <div class="font-mono text-[10px] text-amber/60 leading-none" x-html="ratingBar(r.rating)"></div>
+                      <div class="text-[10px] text-bone2/40 leading-none" x-show="r.reviews">·</div>
+                      <div class="text-[10px] text-bone2/50 leading-none font-mono" x-show="r.reviews" x-text="(r.reviews || 0) + ' rev'"></div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <div class="text-[11px] uppercase tracking-[0.2em] text-bone2/50 mb-3" x-show="r.category" x-text="r.category"></div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm font-mono">
+
+                <div class="flex items-start gap-2 group/field" x-show="r.phone">
+                  <span class="text-amber/60 text-[10px] mt-1.5">☎</span>
+                  <a :href="'tel:' + r.phone" class="text-bone hover:text-amber transition truncate" x-text="r.phone"></a>
+                  <template x-if="waUrl(r)">
+                    <a :href="waUrl(r)" target="_blank" rel="noopener"
+                       :title="r.whatsappConfirmed ? 'WhatsApp confirmed on website' : 'Try WhatsApp'"
+                       :class="r.whatsappConfirmed ? 'text-[#25D366]' : 'text-[#25D366]/45 hover:text-[#25D366]'"
+                       class="inline-flex items-center justify-center w-4 h-4 mt-0.5 transition relative">
+                      <svg viewBox="0 0 32 32" fill="currentColor" class="w-4 h-4">
+                        <path d="M19.11 17.205c-.372 0-1.088 1.39-1.518 1.39a.63.63 0 01-.315-.1c-.802-.402-1.504-.817-2.163-1.426-.545-.516-1.146-1.347-1.46-2.018a.63.63 0 01-.073-.302c0-.547.918-.825.918-1.371 0-.115-.347-.973-.448-1.235-.211-.547-.428-1.219-.872-1.219-.073 0-1.376.187-1.376 1.451 0 1.473 1.218 3.286 1.946 4.001 1.045 1.018 2.078 1.825 3.461 2.42.683.291 1.834.83 2.561.831.585 0 1.49-1.245 1.49-1.74 0-.169-.072-.331-.215-.418-.39-.224-1.434-.587-1.937-.643z"/>
+                        <path d="M16 0C7.163 0 0 7.163 0 16c0 2.831.74 5.486 2.026 7.789L0 32l8.422-2c2.222 1.218 4.795 1.92 7.578 1.92C24.837 31.92 32 24.757 32 16S24.837 0 16 0zm0 28.92c-2.6 0-5.026-.755-7.066-2.053l-4.937 1.173 1.246-4.793C3.927 21.187 3.08 18.689 3.08 16 3.08 8.872 8.872 3.08 16 3.08S28.92 8.872 28.92 16 23.128 28.92 16 28.92z"/>
+                      </svg>
+                      <span x-show="r.whatsappConfirmed" class="absolute -top-1 -right-1 w-1.5 h-1.5 bg-[#25D366] rounded-full"></span>
+                    </a>
+                  </template>
+                  <span class="flex-1"></span>
+                  <button @click="copy(r.phone, 'p_' + r.id)" class="opacity-0 group-hover/field:opacity-100 text-[10px] text-bone2/60 hover:text-amber transition" x-text="copied['p_' + r.id] ? '✓' : '⎘'"></button>
+                </div>
+
+                <div class="flex items-start gap-2 group/field" x-show="r.website">
+                  <span class="text-amber/60 text-[10px] mt-1.5">⌬</span>
+                  <a :href="r.website" target="_blank" rel="noopener" class="text-bone hover:text-amber transition truncate flex-1" x-text="prettyUrl(r.website)"></a>
+                  <button @click="copy(r.website, 'w_' + r.id)" class="opacity-0 group-hover/field:opacity-100 text-[10px] text-bone2/60 hover:text-amber transition" x-text="copied['w_' + r.id] ? '✓' : '⎘'"></button>
+                </div>
+
+                <div class="flex items-start gap-2 group/field md:col-span-1" x-show="r.website || r.email">
+                  <span class="text-signal/70 text-[10px] mt-1.5">✉</span>
+                  <template x-if="r.email">
+                    <a :href="'mailto:' + r.email" class="text-signal hover:text-amber transition truncate flex-1" x-text="r.email"></a>
+                  </template>
+                  <template x-if="!r.email && r.website && emailPending(r)">
+                    <span class="text-bone2/40 italic flex-1">hunting…</span>
+                  </template>
+                  <template x-if="!r.email && r.website && !emailPending(r)">
+                    <span class="text-bone2/30 flex-1">no email found</span>
+                  </template>
+                  <button @click="copy(r.email, 'e_' + r.id)" x-show="r.email" class="opacity-0 group-hover/field:opacity-100 text-[10px] text-bone2/60 hover:text-amber transition" x-text="copied['e_' + r.id] ? '✓' : '⎘'"></button>
+                </div>
+
+                <div class="flex items-start gap-2 group/field md:col-span-2" x-show="r.address">
+                  <span class="text-bone2/40 text-[10px] mt-1.5">◇</span>
+                  <span class="text-bone2 flex-1" x-text="r.address"></span>
+                  <button @click="copy(r.address, 'a_' + r.id)" class="opacity-0 group-hover/field:opacity-100 text-[10px] text-bone2/60 hover:text-amber transition" x-text="copied['a_' + r.id] ? '✓' : '⎘'"></button>
+                </div>
+              </div>
+
+              <div class="mt-4 pt-3 border-t border-line/40 flex items-center justify-between text-[10px] uppercase tracking-[0.25em]">
+                <a :href="r.mapsUrl" target="_blank" rel="noopener" class="text-bone2/50 hover:text-amber transition">view on maps ↗</a>
+                <button @click="copyRow(r)" class="text-bone2/50 hover:text-amber transition" x-text="copied['row_' + r.id] ? 'row copied ✓' : 'copy row ⎘'"></button>
+              </div>
+            </div>
+          </article>
+        </template>
+
+        <div x-show="running" class="border border-dashed border-amber/40 p-6 text-center">
+          <div class="inline-flex items-center gap-3 text-amber text-xs uppercase tracking-[0.3em]">
+            <span class="inline-block w-2 h-2 bg-amber animate-pulse"></span>
+            <span>Scanning feed · <span x-text="results.length"></span> captured</span>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <footer class="border-t border-line/40 mt-16 py-6 text-center text-[10px] uppercase tracking-[0.3em] text-bone2/40">
+    gmap recon // local only // crafted with restraint
+  </footer>
+
+  <div x-show="composeOpen" x-transition.opacity
+       class="fixed inset-0 bg-ink/80 backdrop-blur-sm z-40"
+       @click="closeCompose()" @keydown.escape.window="closeCompose()" style="display:none"></div>
+
+  <aside x-show="composeOpen" x-transition:enter="transition transform ease-out duration-300"
+         x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
+         x-transition:leave="transition transform ease-in duration-200"
+         x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full"
+         class="fixed top-0 right-0 bottom-0 w-full max-w-[760px] bg-ink2 border-l border-line/70 z-50 overflow-y-auto"
+         style="display:none">
+
+    <header class="sticky top-0 z-10 bg-ink2/95 backdrop-blur border-b border-line/70 px-6 py-4 flex items-center justify-between">
+      <div>
+        <div class="text-[10px] uppercase tracking-[0.3em] text-bone2/50">// Outreach</div>
+        <h2 class="font-display text-3xl font-light leading-tight">Compose <span class="italic text-amber">campaign</span>.</h2>
+      </div>
+      <button @click="closeCompose()" class="text-bone2/60 hover:text-alert text-xl">✕</button>
+    </header>
+
+    <div class="p-6 space-y-6">
+
+      <section class="border border-line/60 bg-ink/50">
+        <div class="px-4 py-2 border-b border-line/60 flex items-center justify-between">
+          <div class="text-[10px] uppercase tracking-[0.3em] text-bone2/60">// SMTP</div>
+          <span :class="smtpStatus === 'ok' ? 'text-signal' : (smtpStatus === 'fail' ? 'text-alert' : 'text-bone2/40')"
+                class="text-[10px] uppercase tracking-[0.25em]" x-text="smtpStatusLabel"></span>
+        </div>
+        <div class="p-4 space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[10px] uppercase tracking-[0.3em] text-bone2/60 mb-1">Host</label>
+              <input x-model="smtp.host" type="text" placeholder="smtp.gmail.com"
+                     class="w-full bg-ink border border-line/80 px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber/80"/>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[10px] uppercase tracking-[0.3em] text-bone2/60 mb-1">Port</label>
+                <input x-model.number="smtp.port" type="number" placeholder="465"
+                       class="w-full bg-ink border border-line/80 px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber/80"/>
+              </div>
+              <div>
+                <label class="block text-[10px] uppercase tracking-[0.3em] text-bone2/60 mb-1">TLS</label>
+                <button @click="smtp.secure = !smtp.secure"
+                        :class="smtp.secure ? 'border-amber/80 text-amber' : 'border-line/80 text-bone2/60'"
+                        class="w-full bg-ink border px-3 py-2 text-sm transition flex items-center justify-between">
+                  <span x-text="smtp.secure ? 'SSL' : 'STARTTLS'"></span>
+                  <span x-text="smtp.secure ? '●' : '○'"></span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <label class="block text-[10px] uppercase tracking-[0.3em] text-bone2/60 mb-1">Username</label>
+            <input x-model="smtp.user" type="text" placeholder="you@gmail.com"
+                   class="w-full bg-ink border border-line/80 px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber/80"/>
+          </div>
+          <div>
+            <label class="block text-[10px] uppercase tracking-[0.3em] text-bone2/60 mb-1">Password / App Password</label>
+            <input x-model="smtp.pass" :type="showPass ? 'text' : 'password'" placeholder="••••••••••••••••"
+                   class="w-full bg-ink border border-line/80 px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber/80"/>
+            <div class="flex items-center justify-between mt-2 text-[10px] uppercase tracking-[0.2em] text-bone2/50">
+              <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" x-model="showPass" class="custom-check"/>
+                <span class="check-box small" :class="showPass ? 'is-on' : ''"></span>
+                <span>show</span>
+              </label>
+              <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" x-model="rememberPass" class="custom-check"/>
+                <span class="check-box small" :class="rememberPass ? 'is-on' : ''"></span>
+                <span>remember password on this device</span>
+              </label>
+            </div>
+          </div>
+          <button @click="verifySmtp()" :disabled="smtpVerifying"
+                  class="w-full border border-line/80 py-2 text-[11px] uppercase tracking-[0.3em] text-bone2 hover:border-signal/80 hover:text-signal transition">
+            <span x-show="!smtpVerifying">▸ Verify connection</span>
+            <span x-show="smtpVerifying">testing…</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="border border-line/60 bg-ink/50">
+        <div class="px-4 py-2 border-b border-line/60 text-[10px] uppercase tracking-[0.3em] text-bone2/60">// From</div>
+        <div class="p-4 grid grid-cols-2 gap-3">
+          <div class="col-span-2">
+            <label class="block text-[10px] uppercase tracking-[0.3em] text-bone2/60 mb-1">Display name</label>
+            <input x-model="fromName" type="text" placeholder="Jane Doe"
+                   class="w-full bg-ink border border-line/80 px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber/80"/>
+          </div>
+          <div>
+            <label class="block text-[10px] uppercase tracking-[0.3em] text-bone2/60 mb-1">From email</label>
+            <input x-model="fromEmail" type="email" placeholder="hello@yourdomain.com"
+                   class="w-full bg-ink border border-line/80 px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber/80"/>
+          </div>
+          <div>
+            <label class="block text-[10px] uppercase tracking-[0.3em] text-bone2/60 mb-1">Reply-to</label>
+            <input x-model="replyTo" type="email" placeholder="optional"
+                   class="w-full bg-ink border border-line/80 px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber/80"/>
+          </div>
+        </div>
+      </section>
+
+      <section class="border border-line/60 bg-ink/50">
+        <div class="px-4 py-2 border-b border-line/60 flex items-center justify-between">
+          <div class="text-[10px] uppercase tracking-[0.3em] text-bone2/60">// Recipients</div>
+          <div class="text-[10px] text-bone2/40"><span x-text="recipients.length"></span> selected · <span x-text="recipients.filter(r=>r.email).length"></span> w/ email</div>
+        </div>
+        <div class="p-4">
+          <div x-show="!recipients.length" class="text-[11px] text-bone2/40 italic">No rows selected. Close drawer, tick checkboxes on rows you want to contact.</div>
+          <div class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+            <template x-for="r in recipients" :key="r.id">
+              <div class="inline-flex items-center gap-1.5 border border-line/60 px-2 py-1 text-[11px] font-mono bg-ink/60">
+                <span class="text-amber/80" x-text="r.email || '—'"></span>
+                <button @click="toggleSelect(r.id)" class="text-bone2/40 hover:text-alert">×</button>
+              </div>
+            </template>
+          </div>
+        </div>
+      </section>
+
+      <section class="border border-line/60 bg-ink/50">
+        <div class="px-4 py-2 border-b border-line/60 text-[10px] uppercase tracking-[0.3em] text-bone2/60">// Subject</div>
+        <div class="p-4">
+          <input x-model="subject" type="text" placeholder="Hi {{first_name}}, quick question about {{category}}"
+                 class="w-full bg-ink border border-line/80 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-amber/80"/>
+          <div class="mt-2 flex flex-wrap gap-1 text-[10px] text-bone2/50">
+            <span>tokens:</span>
+            <template x-for="t in tokenList" :key="t">
+              <button @click="insertToken(t)" class="text-amber/70 hover:text-amber font-mono" x-text="'{{'+t+'}}'"></button>
+            </template>
+          </div>
+        </div>
+      </section>
+
+      <section class="border border-line/60 bg-ink/50">
+        <div class="px-4 py-2 border-b border-line/60 flex items-center justify-between">
+          <div class="text-[10px] uppercase tracking-[0.3em] text-bone2/60">// Body</div>
+          <div class="text-[10px] text-bone2/40">use toolbar · insert image</div>
+        </div>
+        <div class="p-4">
+          <div id="quill-editor" class="bg-ink text-bone min-h-[260px] font-sans"></div>
+        </div>
+      </section>
+
+      <section class="border border-line/60 bg-ink/50">
+        <div class="px-4 py-2 border-b border-line/60 text-[10px] uppercase tracking-[0.3em] text-bone2/60">// Throttle</div>
+        <div class="p-4 space-y-2">
+          <div class="flex items-center justify-between text-xs font-mono">
+            <span class="text-bone2/60">Delay between sends</span>
+            <span class="text-amber"><span x-text="(delayMs / 1000).toFixed(1)"></span>s</span>
+          </div>
+          <input x-model.number="delayMs" type="range" min="1000" max="30000" step="500"
+                 class="w-full accent-amber"/>
+          <div class="text-[10px] text-bone2/40" x-show="delayMs < 2000">⚠ Aggressive throttle — may trip rate limits.</div>
+        </div>
+      </section>
+
+      <section class="border border-line/60 bg-ink/50">
+        <div class="px-4 py-2 border-b border-line/60 text-[10px] uppercase tracking-[0.3em] text-bone2/60">// Test send</div>
+        <div class="p-4 flex gap-2">
+          <input x-model="testTo" type="email" placeholder="your@email.com"
+                 class="flex-1 bg-ink border border-line/80 px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber/80"/>
+          <button @click="sendTest()" :disabled="sending || !testTo"
+                  :class="sending || !testTo ? 'opacity-30 cursor-not-allowed' : 'hover:border-signal/80 hover:text-signal'"
+                  class="border border-line/80 px-4 py-2 text-[11px] uppercase tracking-[0.25em] text-bone2 transition">
+            send test
+          </button>
+        </div>
+      </section>
+
+      <section class="border border-amber/40 bg-amber/5">
+        <div class="p-4 space-y-3">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-mono text-bone2/60">ready: <span x-text="recipients.filter(r=>r.email).length"></span> emails · est. <span x-text="estDuration"></span></span>
+            <span x-show="sending" class="text-amber font-mono uppercase tracking-[0.3em] text-[10px]">
+              sent <span x-text="sendStats.sent"></span> · failed <span x-text="sendStats.failed"></span> · skipped <span x-text="sendStats.skipped"></span>
+            </span>
+          </div>
+          <div class="flex gap-2">
+            <button @click="sendAll()" :disabled="sending || !recipients.filter(r=>r.email).length"
+                    :class="sending || !recipients.filter(r=>r.email).length ? 'opacity-30 cursor-not-allowed' : 'hover:bg-amber-soft'"
+                    class="flex-1 bg-amber text-ink font-mono uppercase tracking-[0.25em] text-xs py-3.5 transition">
+              <span x-show="!sending">▶ Send to all</span>
+              <span x-show="sending" class="flex items-center justify-center gap-2">
+                <span class="inline-block w-2 h-2 bg-ink animate-ping"></span>
+                <span>sending…</span>
+              </span>
+            </button>
+            <button @click="stopSend()" x-show="sending"
+                    class="px-4 border border-alert/60 text-alert text-xs uppercase tracking-wider hover:bg-alert hover:text-ink transition">Stop</button>
+          </div>
+          <div x-show="sendStats.feed.length" class="max-h-40 overflow-y-auto border-t border-amber/20 pt-2 mt-2 space-y-1 text-[11px] font-mono">
+            <template x-for="(line, i) in sendStats.feed" :key="i">
+              <div :class="line.kind === 'sent' ? 'text-signal' : line.kind === 'failed' ? 'text-alert' : 'text-bone2/60'">
+                <span x-text="line.kind.toUpperCase().padEnd(8, ' ')"></span>
+                <span x-text="line.email || '—'"></span>
+                <span x-show="line.note" class="text-bone2/40" x-text="' · ' + line.note"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </section>
+
+      <div class="text-[10px] text-bone2/40 leading-relaxed">
+        Local-only. Your SMTP password is sent to your local server only, used for the live send, then dropped — never written to disk. Recipients receive an auto-appended unsubscribe footer + List-Unsubscribe header to comply with anti-spam norms.
+      </div>
+
+    </div>
+  </aside>
+
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+{
+  "name": "gmap-scraper",
+  "version": "1.0.0",
+  "description": "Local Google Maps business scraper with live results, email hunt, CSV/JSON export",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.1",
+    "html-to-text": "^10.0.0",
+    "json2csv": "^6.0.0-alpha.2",
+    "multer": "^2.1.1",
+    "nodemailer": "^8.0.10",
+    "puppeteer": "^23.6.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
